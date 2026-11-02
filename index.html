@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kanban Arolla</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        arolla: {
+                            light: '#EDEEF2',    /* Gris clair */
+                            dark: '#081C11',     /* Vert profond */
+                            bright: '#92DF36',   /* Vert lumineux */
+                            pale: '#E7FAEA'      /* Vert clair */
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background-color: #EDEEF2;
+            color: #081C11;
+        }
+        
+        .kanban-col::-webkit-scrollbar {
+            width: 6px;
+        }
+        .kanban-col::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .kanban-col::-webkit-scrollbar-thumb {
+            background-color: #081C11;
+            opacity: 0.2;
+            border-radius: 20px;
+        }
+
+        .drag-over {
+            background-color: #E7FAEA !important;
+            border: 2px dashed #92DF36 !important;
+        }
+        
+        .card-dragging {
+            opacity: 0.4;
+            transform: scale(0.95);
+        }
+
+        .no-drag {
+            cursor: default;
+        }
+        
+        [contenteditable]:empty:before {
+            content: attr(placeholder);
+            color: #6b7280;
+            pointer-events: none;
+            display: block;
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden">
+
+    <!-- Navbar -->
+    <header class="bg-white shadow-sm px-6 py-4 flex justify-between items-center z-10 border-b border-gray-200">
+        <div class="flex items-center gap-3">
+            <div class="bg-arolla-bright p-2 rounded-lg text-arolla-dark">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
+            </div>
+            <h1 class="text-xl font-bold text-arolla-dark hidden sm:block">Arolla Kanban</h1>
+        </div>
+        
+        <div class="flex items-center gap-2 flex-wrap">
+            <button onclick="downloadTemplate()" class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-lg transition-colors font-medium hidden md:block border border-gray-200 shadow-sm">Modèle CSV</button>
+            <label class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-lg transition-colors font-medium cursor-pointer border border-gray-200 shadow-sm">
+                Importer CSV
+                <input type="file" accept=".csv" class="hidden" onchange="importCSV(event)">
+            </label>
+            <button onclick="exportCSV()" class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-2 rounded-lg transition-colors font-medium border border-gray-200 shadow-sm">Exporter</button>
+            
+            <button onclick="sendReminders()" class="text-xs bg-arolla-pale hover:brightness-95 text-arolla-dark border border-arolla-bright px-3 py-2 rounded-lg transition-colors font-bold flex items-center gap-1 shadow-sm ml-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
+                Rappels (J-1)
+            </button>
+            
+            <button onclick="openModal()" class="bg-arolla-bright hover:brightness-95 text-arolla-dark px-4 py-2 rounded-lg font-bold transition-all shadow-sm flex items-center gap-2 ml-4">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                <span class="hidden sm:inline">Nouvelle Tâche</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Board -->
+    <main class="flex-1 overflow-x-auto overflow-y-hidden p-6">
+        <div class="flex gap-6 h-full min-w-max" id="board-container"></div>
+    </main>
+
+    <!-- Modal d'ajout -->
+    <div id="taskModal" class="fixed inset-0 bg-arolla-dark/80 flex items-center justify-center z-50 transition-opacity opacity-0 hidden" style="transition: opacity 0.2s;">
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden transform transition-transform scale-95" id="modalContent" style="transition: transform 0.2s;">
+            <div class="p-6 border-b border-gray-100 flex justify-between items-center bg-arolla-pale">
+                <h2 class="text-xl font-bold text-arolla-dark">Nouvelle Tâche</h2>
+                <button onclick="closeModal()" class="text-arolla-dark/50 hover:text-arolla-dark transition-colors">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <div class="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+                <div class="flex gap-4">
+                    <div class="w-1/3">
+                        <label class="block text-sm font-bold text-arolla-dark mb-1">Demandeur</label>
+                        <select id="taskReq" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-arolla-bright focus:border-arolla-bright outline-none transition-all">
+                            <option>N+3</option><option>N+2</option><option>N+1</option><option selected>N</option><option>N-1</option><option>N-2</option><option>N-3</option>
+                        </select>
+                    </div>
+                    <div class="w-1/3">
+                        <label class="block text-sm font-bold text-arolla-dark mb-1">Tag</label>
+                        <select id="taskTag" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-arolla-bright focus:border-arolla-bright outline-none transition-all">
+                            <option value="">Aucun</option>
+                            <option value="DIT">DIT</option><option value="DMC">DMC</option><option value="DCO">DCO</option><option value="DGE">DGE</option><option value="DFA">DFA</option><option value="DPC">DPC</option><option value="ASS">ASS</option><option value="EXT">EXT</option><option value="CST">CST</option><option value="CLT">CLT</option>
+                        </select>
+                    </div>
+                    <div class="flex-1">
+                        <label class="block text-sm font-bold text-arolla-dark mb-1">Titre</label>
+                        <input type="text" id="taskTitle" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-arolla-bright focus:border-arolla-bright outline-none transition-all" placeholder="Titre court de la tâche">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-bold text-arolla-dark mb-1">Description</label>
+                    <textarea id="taskDesc" rows="4" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-arolla-bright focus:border-arolla-bright outline-none transition-all resize-none" placeholder="Description détaillée..."></textarea>
+                </div>
+                <div class="flex gap-4">
+                    <div class="flex-1">
+                        <label class="block text-sm font-bold text-arolla-dark mb-1">Colonne</label>
+                        <select id="taskCol" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-arolla-bright focus:border-arolla-bright outline-none transition-all">
+                            <option value="1">1. Prio 1</option><option value="2">2. Prio 2</option><option value="3">3. Prio 3</option><option value="4">4. Divers</option>
+                        </select>
+                    </div>
+                    <div class="flex-1">
+                        <label class="block text-sm font-bold text-arolla-dark mb-1">Échéance</label>
+                        <input type="date" id="taskDue" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-arolla-bright focus:border-arolla-bright outline-none transition-all">
+                    </div>
+                </div>
+            </div>
+            <div class="p-4 bg-gray-50 flex justify-end gap-3 border-t border-gray-100">
+                <button onclick="closeModal()" class="px-4 py-2 text-gray-600 font-medium bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Annuler</button>
+                <button onclick="saveTask()" class="px-4 py-2 bg-arolla-bright text-arolla-dark font-bold rounded-lg hover:brightness-95 transition-all shadow-sm">Créer</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed bottom-4 right-4 bg-arolla-dark text-white px-6 py-3 rounded-lg shadow-xl transition-opacity pointer-events-none z-50 font-medium opacity-0"></div>
+
+    <script>
+        // --- Clés de stockage LocalStorage ---
+        const STORAGE_KEY_TASKS = 'arollaTasks';
+        const STORAGE_KEY_COLS = 'arollaCols';
+
+        // --- Paramètres par défaut & État ---
+        const defaultCols = {1: 'Prio 1', 2: 'Prio 2', 3: 'Prio 3', 4: 'Divers', 5: 'Archivé'};
+        let columnTitles = { ...defaultCols };
+        let columnSorts = {1: 'created', 2: 'created', 3: 'created', 4: 'created', 5: 'created'};
+        let tasks = [];
+        
+        const taskTagsList = ["DIT", "DMC", "DCO", "DGE", "DFA", "DPC", "ASS", "EXT", "CST", "CLT"];
+        const tagColors = {
+            "DIT": "bg-blue-100 text-blue-800 border-blue-200",
+            "DMC": "bg-red-100 text-red-800 border-red-200",
+            "DCO": "bg-yellow-100 text-yellow-800 border-yellow-200",
+            "DGE": "bg-purple-100 text-purple-800 border-purple-200",
+            "DFA": "bg-pink-100 text-pink-800 border-pink-200",
+            "DPC": "bg-indigo-100 text-indigo-800 border-indigo-200",
+            "ASS": "bg-teal-100 text-teal-800 border-teal-200",
+            "EXT": "bg-orange-100 text-orange-800 border-orange-200",
+            "CST": "bg-cyan-100 text-cyan-800 border-cyan-200",
+            "CLT": "bg-lime-100 text-lime-800 border-lime-200",
+            "": "bg-white text-gray-500 border-gray-200"
+        };
+
+        // --- Gestion du LocalStorage ---
+        function loadLocal() {
+            try {
+                const storedTasks = localStorage.getItem(STORAGE_KEY_TASKS);
+                tasks = storedTasks ? JSON.parse(storedTasks) : [];
+                
+                const storedCols = localStorage.getItem(STORAGE_KEY_COLS);
+                columnTitles = storedCols ? { ...defaultCols, ...JSON.parse(storedCols) } : { ...defaultCols };
+            } catch (e) {
+                console.error("Erreur lors de la lecture du LocalStorage :", e);
+                tasks = [];
+                columnTitles = { ...defaultCols };
+            }
+        }
+
+        function persistTasks() {
+            localStorage.setItem(STORAGE_KEY_TASKS, JSON.stringify(tasks));
+        }
+
+        function persistCols() {
+            localStorage.setItem(STORAGE_KEY_COLS, JSON.stringify(columnTitles));
+        }
+
+        function saveTaskToStorage(task) {
+            const existingIndex = tasks.findIndex(t => t.id === task.id);
+            if (existingIndex > -1) {
+                tasks[existingIndex] = task;
+            } else {
+                tasks.push(task);
+            }
+            persistTasks();
+            renderBoard();
+        }
+
+        function deleteTaskFromStorage(taskId) {
+            tasks = tasks.filter(t => t.id !== taskId);
+            persistTasks();
+            renderBoard();
+        }
+
+        // --- Utilitaires ---
+        function escapeHTML(str) {
+            if (!str) return '';
+            return str.replace(/[&<>'"]/g, tag => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'}[tag] || tag));
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return 'N/A';
+            const d = new Date(dateStr);
+            return isNaN(d.getTime()) ? 'N/A' : d.toLocaleDateString('fr-FR');
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.innerText = msg;
+            toast.classList.remove('opacity-0');
+            setTimeout(() => toast.classList.add('opacity-0'), 3000);
+        }
+
+        // --- Rendu principal ---
+        window.renderBoard = function() {
+            const board = document.getElementById('board-container');
+            board.innerHTML = '';
+            
+            for(let i = 1; i <= 5; i++) {
+                const isArchive = (i === 5);
+                let colTasks = tasks.filter(t => t.column === i);
+                
+                colTasks.sort((a, b) => {
+                    const sort = columnSorts[i];
+                    if(sort === 'created') return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
+                    if(sort === 'due') {
+                        if(!a.dueDate) return 1; if(!b.dueDate) return -1;
+                        return new Date(a.dueDate) - new Date(b.dueDate);
+                    }
+                    if(sort === 'req') {
+                        const rank = {"N+3":1, "N+2":2, "N+1":3, "N":4, "N-1":5, "N-2":6, "N-3":7};
+                        return (rank[a.requester] || 4) - (rank[b.requester] || 4);
+                    }
+                    if(sort === 'tag') return (a.tag || '').localeCompare(b.tag || '');
+                    return 0;
+                });
+
+                let colHTML = `
+                <div class="w-80 flex flex-col bg-white rounded-xl shadow-sm flex-shrink-0 border border-gray-200 transition-colors ${isArchive ? 'bg-gray-50/80 border-dashed border-gray-300' : ''}" id="col-container-${i}">
+                    <div class="p-3 border-b border-gray-100 ${isArchive ? 'bg-gray-100 text-gray-600' : 'bg-arolla-pale'} rounded-t-xl flex justify-between items-center gap-2">
+                        <div class="flex-1 font-bold text-sm outline-none focus:ring-2 focus:ring-arolla-bright p-1 rounded" contenteditable="true" onblur="updateColTitle(${i}, this.innerText)" onkeydown="if(event.key === 'Enter') { event.preventDefault(); this.blur(); }">${escapeHTML(columnTitles[i])}</div>
+                        <select class="text-[10px] font-medium bg-white border border-gray-200 rounded px-1 py-0.5 text-gray-600 cursor-pointer outline-none focus:border-arolla-bright" onchange="changeSort(${i}, this.value)">
+                            <option value="created" ${columnSorts[i] === 'created' ? 'selected' : ''}>Date Créa.</option>
+                            <option value="due" ${columnSorts[i] === 'due' ? 'selected' : ''}>Échéance</option>
+                            <option value="req" ${columnSorts[i] === 'req' ? 'selected' : ''}>Demandeur</option>
+                            <option value="tag" ${columnSorts[i] === 'tag' ? 'selected' : ''}>Tag</option>
+                        </select>
+                        <span id="count-${i}" class="bg-white text-arolla-dark font-bold text-xs px-2 py-1 rounded-full shadow-sm">${colTasks.length}</span>
+                    </div>
+                    <div class="kanban-col flex-1 p-1.5 overflow-y-auto space-y-1.5 bg-arolla-light/30 rounded-b-xl" ondrop="drop(event, ${i})" ondragover="allowDrop(event)" ondragleave="dragLeave(event)" id="col-${i}">
+                `;
+
+                colTasks.forEach(task => {
+                    const limit = 50;
+                    const isLong = (task.description || "").length > limit;
+                    let descHTML = '';
+
+                    if (isLong && !task.expanded) {
+                        descHTML = `<div class="text-[10px] text-gray-600 cursor-pointer hover:bg-white/60 p-0.5 -mx-0.5 rounded transition-colors no-drag mt-0.5 leading-tight" onclick="toggleExpand('${task.id}'); event.stopPropagation()">${escapeHTML(task.description.substring(0, limit))}... <span class="text-arolla-bright font-bold text-[9px] ml-1">Voir plus</span></div>`;
+                    } else {
+                        descHTML = `<div contenteditable="${!isArchive}" onblur="updateTaskDesc('${task.id}', this.innerText)" onmousedown="this.focus(); event.stopPropagation();" class="text-[10px] text-gray-700 leading-snug whitespace-pre-wrap outline-none focus:bg-white/80 focus:ring-2 focus:ring-arolla-bright/50 rounded p-0.5 -mx-0.5 min-h-[1rem] transition-all mt-0.5 no-drag ${isArchive ? 'cursor-not-allowed' : 'cursor-text hover:bg-white/50'}">${escapeHTML(task.description)}</div>`;
+                        if (isLong && task.expanded) descHTML += `<button onclick="toggleExpand('${task.id}'); event.stopPropagation()" class="text-[9px] font-bold text-gray-500 hover:text-arolla-dark mt-0.5 no-drag transition-colors">Réduire</button>`;
+                    }
+
+                    colHTML += `
+                    <div class="kanban-card p-1.5 rounded-lg shadow-sm border border-gray-200 cursor-grab active:cursor-grabbing transition-all ${isArchive ? 'opacity-70 grayscale-[30%]' : 'hover:shadow-md hover:border-arolla-bright/50'}" style="background: radial-gradient(circle at top left, #ffffff 0%, #EDEEF2 100%);" draggable="true" id="${task.id}" ondragstart="dragStart(event)" ondragend="dragEnd(event)">
+                        
+                        <!-- Actions -->
+                        <div class="flex justify-between items-center mb-1 no-drag gap-1">
+                            <div class="flex items-center gap-1.5">
+                                <label class="flex items-center gap-0.5 cursor-pointer group" onclick="event.stopPropagation()">
+                                    <input type="checkbox" class="w-3 h-3 text-arolla-bright bg-white border-gray-300 rounded focus:ring-arolla-bright cursor-pointer" ${isArchive ? 'checked' : ''} onchange="toggleArchive('${task.id}', this.checked)">
+                                    <span class="text-[9px] font-bold ${isArchive ? 'text-arolla-dark' : 'text-gray-500 group-hover:text-arolla-dark'} transition-colors">Archiver</span>
+                                </label>
+                                <button onclick="duplicateTask('${task.id}'); event.stopPropagation();" class="text-gray-400 hover:text-blue-500 transition-colors p-0.5 rounded hover:bg-blue-50/50" title="Dupliquer">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                                </button>
+                                <button onclick="deleteTask('${task.id}'); event.stopPropagation();" class="text-gray-400 hover:text-red-500 transition-colors p-0.5 rounded hover:bg-red-50/50" title="Supprimer">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                </button>
+                            </div>
+                            <select class="text-[9px] font-semibold bg-white border border-gray-200 text-gray-700 rounded px-1 py-0 outline-none focus:border-arolla-bright cursor-pointer shadow-sm" onchange="moveTask('${task.id}', parseInt(this.value))" onclick="event.stopPropagation()">
+                                ${[1,2,3,4].map(c => `<option value="${c}" ${task.column === c ? 'selected' : ''}>${c}. ${escapeHTML(columnTitles[c])}</option>`).join('')}
+                                ${isArchive ? `<option value="5" selected hidden>5. ${escapeHTML(columnTitles[5])}</option>` : ''}
+                            </select>
+                        </div>
+
+                        <!-- Body -->
+                        <div class="no-drag flex flex-col gap-0.5">
+                            <div class="flex items-start gap-1">
+                                <select onchange="updateTaskReq('${task.id}', this.value)" onclick="event.stopPropagation()" class="text-[9px] font-bold bg-white border border-gray-200 text-arolla-dark rounded py-0 px-0.5 cursor-pointer focus:border-arolla-bright outline-none shadow-sm">
+                                    ${['N+3', 'N+2', 'N+1', 'N', 'N-1', 'N-2', 'N-3'].map(r => `<option ${task.requester === r ? 'selected' : ''}>${r}</option>`).join('')}
+                                </select>
+                                <select onchange="updateTaskTag('${task.id}', this.value)" onclick="event.stopPropagation()" class="text-[9px] border font-bold rounded py-0 px-0.5 cursor-pointer focus:border-arolla-bright outline-none shadow-sm transition-colors ${tagColors[task.tag || ''] || tagColors['']}">
+                                    <option value="" class="bg-white text-gray-500">- Tag -</option>
+                                    ${taskTagsList.map(t => `<option value="${t}" class="${tagColors[t]}" ${task.tag === t ? 'selected' : ''}>${t}</option>`).join('')}
+                                </select>
+                                <div contenteditable="${!isArchive}" placeholder="Titre" onblur="updateTaskTitle('${task.id}', this.innerText)" onkeydown="if(event.key === 'Enter') { event.preventDefault(); this.blur(); }" onmousedown="this.focus(); event.stopPropagation();" class="flex-1 text-[11px] font-bold text-arolla-dark outline-none focus:bg-white/80 focus:ring-2 focus:ring-arolla-bright/50 rounded px-1 -mx-1 transition-all leading-tight ${isArchive ? 'line-through opacity-70 cursor-not-allowed' : 'cursor-text hover:bg-white/50'}">${escapeHTML(task.title)}</div>
+                            </div>
+                            ${descHTML}
+                        </div>
+                        
+                        <!-- Footer -->
+                        <div class="mt-1 pt-1 border-t border-gray-200/60 flex justify-between items-center no-drag">
+                            <div class="text-[8px] text-gray-500 font-medium leading-tight">Créé : ${formatDate(task.createdAt)}</div>
+                            <div class="flex items-center gap-0.5 bg-white/80 px-1 py-0 rounded border border-gray-200 shadow-sm" title="Date d'échéance">
+                                <svg class="w-2.5 h-2.5 text-arolla-bright" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                                <input type="date" onchange="updateTaskDueDate('${task.id}', this.value)" onclick="event.stopPropagation()" value="${task.dueDate || ''}" class="text-[8px] font-bold text-arolla-dark bg-transparent outline-none cursor-pointer">
+                            </div>
+                        </div>
+                    </div>`;
+                });
+
+                colHTML += `</div></div>`;
+                board.innerHTML += colHTML;
+            }
+        }
+
+        // --- Opérations Tâches et Colonnes ---
+        window.changeSort = function(colIndex, sortType) { 
+            columnSorts[colIndex] = sortType; 
+            window.renderBoard(); 
+        }
+        
+        window.updateColTitle = function(colIndex, title) {
+            columnTitles[colIndex] = title.trim() || defaultCols[colIndex];
+            persistCols();
+        }
+
+        window.toggleArchive = function(id, isChecked) {
+            const task = tasks.find(t => t.id === id);
+            if(task) { 
+                task.column = isChecked ? 5 : 1; 
+                saveTaskToStorage(task); 
+            }
+        }
+
+        window.moveTask = function(id, newCol) {
+            const task = tasks.find(t => t.id === id);
+            if(task) { 
+                task.column = newCol; 
+                saveTaskToStorage(task); 
+            }
+        }
+
+        window.toggleExpand = function(id) {
+            const task = tasks.find(t => t.id === id);
+            if(task) { 
+                task.expanded = !task.expanded; 
+                saveTaskToStorage(task); 
+            }
+        }
+
+        window.deleteTask = function(id) { 
+            deleteTaskFromStorage(id); 
+        }
+        
+        window.duplicateTask = function(id) {
+            const task = tasks.find(t => t.id === id);
+            if(task) {
+                const newTask = { 
+                    ...task, 
+                    id: 'task-' + Date.now() + Math.random().toString(36).substring(2, 5), 
+                    createdAt: new Date().toISOString() 
+                };
+                saveTaskToStorage(newTask);
+                showToast("Tâche dupliquée !");
+            }
+        }
+
+        window.updateTaskTitle = function(id, val) {
+            const t = tasks.find(t => t.id === id);
+            if(t) { t.title = val.trim() || "Sans titre"; saveTaskToStorage(t); }
+        }
+        window.updateTaskDesc = function(id, val) {
+            const t = tasks.find(t => t.id === id);
+            if(t) { t.description = val.trim(); saveTaskToStorage(t); }
+        }
+        window.updateTaskReq = function(id, val) {
+            const t = tasks.find(t => t.id === id);
+            if(t) { t.requester = val; saveTaskToStorage(t); }
+        }
+        window.updateTaskTag = function(id, val) {
+            const t = tasks.find(t => t.id === id);
+            if(t) { t.tag = val; saveTaskToStorage(t); }
+        }
+        window.updateTaskDueDate = function(id, val) {
+            const t = tasks.find(t => t.id === id);
+            if(t) { t.dueDate = val; saveTaskToStorage(t); }
+        }
+
+        // --- Drag & Drop ---
+        window.dragStart = function(e) {
+            if (e.target.hasAttribute('contenteditable') || e.target.closest('.no-drag')) { 
+                e.preventDefault(); 
+                return; 
+            }
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', e.target.id);
+            setTimeout(() => { e.target.classList.add('card-dragging'); }, 0);
+        }
+        
+        window.dragEnd = function(e) {
+            e.target.classList.remove('card-dragging');
+            document.querySelectorAll('.kanban-col').forEach(col => col.parentElement.classList.remove('drag-over'));
+        }
+        
+        window.allowDrop = function(e) {
+            e.preventDefault();
+            const container = e.target.closest('div[id^="col-container-"]');
+            if(container) container.classList.add('drag-over');
+        }
+        
+        window.dragLeave = function(e) {
+            const container = e.target.closest('div[id^="col-container-"]');
+            if(container) container.classList.remove('drag-over');
+        }
+        
+        window.drop = function(e, colId) {
+            e.preventDefault();
+            const container = e.target.closest('div[id^="col-container-"]');
+            if(container) container.classList.remove('drag-over');
+            const id = e.dataTransfer.getData('text/plain');
+            if(id) window.moveTask(id, colId);
+        }
+
+        // --- Import / Export CSV & Rappels ---
+        window.exportCSV = function() {
+            let csv = 'Titre;Description;Tag;Colonne;Demandeur;Date Echeance;Date Creation\n';
+            tasks.forEach(t => {
+                csv += `"${(t.title || '').replace(/"/g, '""')}";"${(t.description || '').replace(/"/g, '""')}";${t.tag || ''};${t.column};${t.requester};${t.dueDate || ''};${t.createdAt || ''}\n`;
+            });
+            window.downloadFile(csv, "kanban_export.csv");
+            showToast("Export réussi !");
+        }
+
+        window.downloadTemplate = function() {
+            const csv = 'Titre;Description;Tag (ex: DIT, DMC...);Colonne (1-4);Demandeur (N+3 a N-3);Date Echeance (YYYY-MM-DD)\nExemple de tâche;Voici une description;DIT;1;N;2026-12-31\n';
+            window.downloadFile(csv, "kanban_template.csv");
+        }
+
+        window.downloadFile = function(content, filename) {
+            const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.setAttribute("href", url);
+            link.setAttribute("download", filename);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        window.importCSV = function(e) {
+            const file = e.target.files[0];
+            if(!file) return;
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                const lines = evt.target.result.split('\n');
+                let imported = 0;
+                for(let i = 1; i < lines.length; i++) {
+                    if(!lines[i].trim()) continue;
+                    const row = lines[i].split(';'); 
+                    if(row.length >= 2) {
+                        const newTask = {
+                            id: 'task-' + Date.now() + Math.random().toString(36).substring(2, 5),
+                            title: (row[0] || 'Sans titre').replace(/^"|"$/g, ''),
+                            description: (row[1] || '').replace(/^"|"$/g, ''),
+                            tag: taskTagsList.includes(row[2]) ? row[2] : '',
+                            column: Math.min(Math.max(parseInt(row[3]) || 1, 1), 5),
+                            requester: row[4] || 'N',
+                            dueDate: row[5] || '',
+                            createdAt: new Date().toISOString(),
+                            expanded: false
+                        };
+                        tasks.push(newTask);
+                        imported++;
+                    }
+                }
+                if(imported > 0) {
+                    persistTasks();
+                    window.renderBoard();
+                }
+                showToast(imported + " tâche(s) importée(s) !");
+            };
+            reader.readAsText(file);
+            e.target.value = '';
+        }
+
+        window.sendReminders = function() {
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            const tmwStr = tomorrow.toISOString().split('T')[0];
+
+            const dueTasks = tasks.filter(t => t.column !== 5 && t.dueDate === tmwStr);
+
+            if (dueTasks.length === 0) {
+                showToast("Aucune tâche n'arrive à échéance demain.");
+                return;
+            }
+
+            const subject = encodeURIComponent("Rappel Kanban: Tâches à échéance (J-1)");
+            let bodyText = "Bonjour,\n\nVoici les tâches du Kanban qui arrivent à échéance demain :\n\n";
+            dueTasks.forEach(t => {
+                bodyText += `- [${columnTitles[t.column]}] ${t.title} (Demandé par ${t.requester})\n`;
+            });
+            
+            window.location.href = `mailto:arnaud.lacroix@arolla.fr?subject=${subject}&body=${encodeURIComponent(bodyText)}`;
+            showToast("Ouverture de votre client mail...");
+        }
+
+        // --- Modale Tâche ---
+        const modal = document.getElementById('taskModal');
+        const modalContent = document.getElementById('modalContent');
+        
+        window.openModal = function() {
+            document.getElementById('taskTitle').value = '';
+            document.getElementById('taskDesc').value = '';
+            document.getElementById('taskReq').value = 'N';
+            document.getElementById('taskTag').value = '';
+            document.getElementById('taskDue').value = '';
+            
+            const colSelect = document.getElementById('taskCol');
+            colSelect.innerHTML = [1,2,3,4].map(c => `<option value="${c}">${c}. ${escapeHTML(columnTitles[c])}</option>`).join('');
+            colSelect.value = '1';
+            
+            modal.classList.remove('hidden');
+            setTimeout(() => {
+                modal.classList.remove('opacity-0');
+                modalContent.classList.remove('scale-95');
+            }, 10);
+        }
+
+        window.closeModal = function() {
+            modal.classList.add('opacity-0');
+            modalContent.classList.add('scale-95');
+            setTimeout(() => modal.classList.add('hidden'), 200);
+        }
+
+        window.saveTask = function() {
+            const titleInput = document.getElementById('taskTitle');
+            const title = titleInput.value.trim();
+
+            if(!title) {
+                titleInput.classList.add('border-red-500', 'ring-red-500');
+                setTimeout(() => titleInput.classList.remove('border-red-500', 'ring-red-500'), 2000);
+                return;
+            }
+
+            const newTask = {
+                id: 'task-' + Date.now(),
+                title: title,
+                description: document.getElementById('taskDesc').value.trim(),
+                column: parseInt(document.getElementById('taskCol').value),
+                requester: document.getElementById('taskReq').value,
+                tag: document.getElementById('taskTag').value,
+                dueDate: document.getElementById('taskDue').value,
+                createdAt: new Date().toISOString(),
+                expanded: false
+            };
+
+            saveTaskToStorage(newTask);
+            closeModal();
+            showToast("Tâche créée !");
+        }
+
+        // --- Démarrage de l'application ---
+        loadLocal();
+        window.renderBoard();
+    </script>
+</body>
+</html>
